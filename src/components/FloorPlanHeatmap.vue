@@ -315,7 +315,25 @@ function zoneHitStyle(id) {
 .l-pip { display:inline-block; width:8px; height:8px; border-radius:50%; }
 
 /* ── Heat map mode ───────────────────────────────────── */
-.store-wrap { flex:1; position:relative; display:flex; align-items:center; justify-content:center; overflow:hidden; padding: 24px 32px 56px; }
+.store-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  isolation: isolate;
+  padding: 24px 32px 56px;
+}
+
+.store-wrap::before {
+  content: '';
+  position: absolute;
+  inset: -120px;
+  z-index: 0;
+  background: #fff;
+  pointer-events: none;
+}
 
 .store-viewer {
   position: relative;
@@ -353,10 +371,13 @@ function zoneHitStyle(id) {
 
 .heat-overlay {
   position: absolute;
-  inset: 0;
+  inset: -72px -48px -120px;
   z-index: 2;
   pointer-events: none;
   mix-blend-mode: screen;
+  background-size: calc(100% - 96px) calc(100% - 192px) !important;
+  background-position: 48px 72px !important;
+  background-repeat: no-repeat !important;
 }
 
 /* Invisible zone hit targets over image */
