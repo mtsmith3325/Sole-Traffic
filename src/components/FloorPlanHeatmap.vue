@@ -42,11 +42,52 @@
 
       <!-- Bottom controls -->
       <div class="store-controls">
-        <button class="view-pill">
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M7 2L3 5.5L7 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span style="display:inline-block;width:22px"/>
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M4 2L8 5.5L4 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
+        <!-- Time-lapse scrubber -->
+        <div class="time-scrubber" :class="{ 'is-playing': isPlaying }">
+          <button class="scrubber-play" :aria-label="isPlaying ? 'Pause' : 'Play'" @click="togglePlay">
+            <!-- Pause icon -->
+            <svg v-if="isPlaying" width="12" height="14" viewBox="0 0 12 14" fill="currentColor">
+              <rect x="0" y="0" width="4" height="14" rx="1.5"/>
+              <rect x="8" y="0" width="4" height="14" rx="1.5"/>
+            </svg>
+            <!-- Play icon -->
+            <svg v-else width="12" height="14" viewBox="0 0 12 14" fill="currentColor">
+              <path d="M1 1L11 7L1 13V1Z" stroke="currentColor" stroke-width="0" stroke-linejoin="round"/>
+            </svg>
+          </button>
+
+          <div class="scrubber-body">
+            <div class="scrubber-label-row">
+              <span class="scrubber-time-label">{{ timelapseSnapshots[timeLapseIndex].label }}</span>
+              <div class="scrubber-ticks">
+                <span
+                  v-for="(snap, i) in timelapseSnapshots"
+                  :key="i"
+                  class="scrubber-tick"
+                  :class="{ active: i <= timeLapseIndex }"
+                />
+              </div>
+            </div>
+
+            <!-- Visible track + hidden native range input overlaid -->
+            <div class="scrubber-track-wrap">
+              <div class="scrubber-track">
+                <div class="scrubber-fill" :style="{ width: (timeLapseIndex / 3 * 100) + '%' }"/>
+                <div class="scrubber-thumb" :style="{ left: (timeLapseIndex / 3 * 100) + '%' }"/>
+              </div>
+              <input
+                class="scrubber-input"
+                type="range"
+                min="0"
+                max="3"
+                step="1"
+                :value="timeLapseIndex"
+                @input="onScrub"
+              />
+            </div>
+          </div>
+        </div>
+
         <button
           class="view-360"
           :class="{ active: rotationActive }"
@@ -153,7 +194,8 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { timelapseSnapshots } from '../data/mockData.js'
 
 const props = defineProps({
   zones: { type: Array, required: true },
@@ -165,10 +207,55 @@ const viewerElement = ref(null)
 const rotationActive = ref(false)
 const viewerReady = ref(false)
 
+// ─── Time-lapse scrubber ─────────────────────────────────────────────────────
+const timeLapseIndex = ref(0)
+const isPlaying = ref(false)
+let playTimer = null
+
+function onScrub(e) {
+  timeLapseIndex.value = Number(e.target.value)
+  stopPlay()
+}
+
+function togglePlay() {
+  if (isPlaying.value) {
+    stopPlay()
+  } else {
+    startPlay()
+  }
+}
+
+function startPlay() {
+  // If already at the end, restart from beginning
+  if (timeLapseIndex.value >= timelapseSnapshots.length - 1) {
+    timeLapseIndex.value = 0
+  }
+  isPlaying.value = true
+  playTimer = setInterval(() => {
+    if (timeLapseIndex.value < timelapseSnapshots.length - 1) {
+      timeLapseIndex.value++
+    } else {
+      stopPlay()
+    }
+  }, 1400)
+}
+
+function stopPlay() {
+  isPlaying.value = false
+  if (playTimer) {
+    clearInterval(playTimer)
+    playTimer = null
+  }
+}
+
 onMounted(() => {
   if (props.showHeat) {
     initialize360Viewer()
   }
+})
+
+onBeforeUnmount(() => {
+  stopPlay()
 })
 
 async function initialize360Viewer(attempt = 0) {
@@ -254,23 +341,38 @@ const ZONE_HEAT_POS = {
 const DEFAULT_POS = { cx: '50%', cy: '46%' }
 
 const heatStyle = computed(() => {
-  const pos = ZONE_HEAT_POS[props.selectedZoneId] || DEFAULT_POS
-  const cx = pos.cx
-  const cy = pos.cy
+  const snapshot = timelapseSnapshots[timeLapseIndex.value]
+  const gradients = []
 
-  // Traffic-light heat: red core → yellow mid → green outer
-  return {
-    background: [
-      // Red hotspot core (high traffic)
-      `radial-gradient(circle 140px at ${cx} ${cy}, rgba(220,38,38,1.0) 0%, rgba(239,68,68,1.0) 30%, rgba(234,179,8,0.70) 58%, transparent 80%)`,
-      // Yellow secondary ring (medium traffic)
-      `radial-gradient(circle 260px at ${cx} ${cy}, rgba(234,179,8,0.55) 0%, rgba(234,179,8,0.30) 48%, transparent 72%)`,
-      // Green outer aura (low traffic bleed)
-      `radial-gradient(circle 380px at ${cx} ${cy}, rgba(22,163,74,0.38) 0%, rgba(34,197,94,0.18) 55%, transparent 78%)`,
-      // Faint green ambient
-      `radial-gradient(circle 480px at ${cx} ${cy}, rgba(34,197,94,0.10) 0%, transparent 65%)`,
-    ].join(','),
-  }
+  // Render a blob for every zone, sized and colored by traffic at the current time slice
+  props.zones.forEach((zone) => {
+    const pos = ZONE_HEAT_POS[zone.id] || DEFAULT_POS
+    const traffic = snapshot?.zones[zone.id] ?? zone.avgTraffic
+    const intensity = traffic / 100
+    const coreR   = Math.round(60  + intensity * 120)  // 60–180 px
+    const midR    = Math.round(140 + intensity * 160)  // 140–300 px
+    const outerR  = Math.round(200 + intensity * 200)  // 200–400 px
+    const isHot   = traffic >= 75
+    const isMid   = traffic >= 45
+
+    // Core: red/amber/green per traffic level
+    const [cr, cg, cb] = isHot ? [220, 38, 38] : isMid ? [234, 179, 8] : [22, 163, 74]
+    // Outer glow: green ambient for all zones
+    const [gr, gg, gb] = [34, 197, 94]
+
+    const a0 = (intensity * 0.90).toFixed(2)
+    const a1 = (intensity * 0.48).toFixed(2)
+    const a2 = (intensity * 0.22).toFixed(2)
+    const a3 = (intensity * 0.10).toFixed(2)
+
+    gradients.push(
+      `radial-gradient(circle ${coreR}px at ${pos.cx} ${pos.cy}, rgba(${cr},${cg},${cb},${a0}) 0%, rgba(${cr},${cg},${cb},${a1}) 45%, transparent 80%)`,
+      `radial-gradient(circle ${midR}px at ${pos.cx} ${pos.cy}, rgba(${cr},${cg},${cb},${a2}) 0%, transparent 70%)`,
+      `radial-gradient(circle ${outerR}px at ${pos.cx} ${pos.cy}, rgba(${gr},${gg},${gb},${a3}) 0%, transparent 65%)`,
+    )
+  })
+
+  return { background: gradients.join(',') }
 })
 
 // Zone click hit-area positions (% within the store image)
@@ -432,24 +534,129 @@ function zoneHitStyle(id) {
   z-index: 10;
 }
 
-.view-pill {
+/* ── Time-lapse scrubber ─────────────────────────────── */
+.time-scrubber {
   pointer-events: all;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  padding: 10px 28px;
+  gap: 10px;
+  padding: 10px 18px 10px 14px;
   border-radius: 999px;
   background: #F8C840;
   border: none;
+  box-shadow: 0 4px 18px rgba(248, 200, 64, 0.42);
+  transition: box-shadow 120ms, transform 120ms;
+  min-width: 240px;
+}
+.time-scrubber:hover { box-shadow: 0 6px 24px rgba(248, 200, 64, 0.56); }
+
+.scrubber-play {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.14);
+  border: none;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: #1A1200;
-  font-size: 13px;
+  padding: 0;
+  padding-left: 1px; /* optical center for play arrow */
+  transition: background 100ms, transform 80ms;
+}
+.scrubber-play:hover { background: rgba(0, 0, 0, 0.22); }
+.scrubber-play:active { transform: scale(0.92); }
+.time-scrubber.is-playing .scrubber-play { padding-left: 0; }
+
+.scrubber-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.scrubber-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scrubber-time-label {
+  font-size: 12px;
   font-weight: 700;
-  box-shadow: 0 4px 18px rgba(248,200,64,0.40);
-  transition: transform 120ms, box-shadow 120ms;
+  color: #1A1200;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+
+.scrubber-ticks {
+  display: flex;
   gap: 4px;
 }
-.view-pill:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(248,200,64,0.52); }
+.scrubber-tick {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.2);
+  transition: background 220ms;
+}
+.scrubber-tick.active { background: rgba(0, 0, 0, 0.6); }
+
+.scrubber-track-wrap {
+  position: relative;
+  height: 16px;
+  display: flex;
+  align-items: center;
+}
+
+.scrubber-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+
+.scrubber-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  transition: width 280ms cubic-bezier(0.25, 1, 0.5, 1);
+  pointer-events: none;
+}
+
+.scrubber-thumb {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #1A1200;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  transition: left 280ms cubic-bezier(0.25, 1, 0.5, 1);
+  pointer-events: none;
+}
+
+/* Transparent native range input sits on top of the visual track */
+.scrubber-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  margin: 0;
+  -webkit-appearance: none;
+}
 
 .view-360 {
   position: absolute;
