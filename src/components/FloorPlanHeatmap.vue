@@ -173,7 +173,7 @@ onMounted(() => {
 async function initialize360Viewer(attempt = 0) {
   await nextTick()
 
-  if (typeof window.CI360 !== 'function') {
+  if (!window.CI360) {
     if (attempt < 30) {
       window.setTimeout(() => initialize360Viewer(attempt + 1), 100)
     }
@@ -181,7 +181,14 @@ async function initialize360Viewer(attempt = 0) {
   }
 
   try {
-    const viewer = new window.CI360()
+    const viewer = typeof window.CI360 === 'function'
+      ? new window.CI360()
+      : window.CI360
+
+    if (typeof viewer.initAll !== 'function') {
+      throw new TypeError('Cloudimage 360 initAll() is unavailable.')
+    }
+
     viewer.initAll()
     viewerReady.value = true
   } catch (error) {
@@ -336,6 +343,12 @@ function zoneHitStyle(id) {
   width: auto !important;
   height: auto !important;
   object-fit: contain !important;
+}
+
+.store-viewer :deep(.cloudimage-360-hints-overlay),
+.store-viewer :deep(.cloudimage-360-zoom-controls),
+.store-viewer :deep(.cloudimage-loading-spinner) {
+  display: none !important;
 }
 
 .heat-overlay {
