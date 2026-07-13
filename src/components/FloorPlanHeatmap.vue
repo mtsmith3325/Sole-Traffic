@@ -4,9 +4,19 @@
     <!-- ══════════════ HEAT MAP MODE (3D image + blob) ══════════════ -->
     <template v-if="showHeat">
       <div class="store-wrap">
-        <img :src="storeImg" class="store-img" alt="Store floor plan isometric render" draggable="false" />
+        <div
+          ref="viewerElement"
+          class="cloudimage-360 store-viewer"
+          :class="{ 'rotation-active': rotationActive }"
+          data-folder="/images/store-360/"
+          data-filename-x="store-{index}.jpg"
+          data-amount-x="3"
+          data-hide-360-logo="true"
+          data-full-screen="false"
+          aria-label="Interactive 360 degree store floor plan"
+        />
 
-        <!-- Heat blob overlay — layers build the purple/pink/orange glow -->
+        <!-- Heat blob remains visible while the store rotates. -->
         <div class="heat-overlay" :style="heatStyle" />
 
         <!-- Zone selection dots (invisible click targets over image areas) -->
@@ -17,8 +27,16 @@
           :class="{ active: z.id === selectedZoneId }"
           :style="zoneHitStyle(z.id)"
           :title="z.label"
+          :disabled="rotationActive"
           @click="emit('select-zone', z.id)"
         />
+
+        <transition name="callout">
+          <div v-if="rotationActive" class="rotation-hint">
+            <span class="rotation-hint-icon">↔</span>
+            Drag the store to rotate
+          </div>
+        </transition>
       </div>
 
       <!-- Bottom controls -->
@@ -28,13 +46,18 @@
           <span style="display:inline-block;width:22px"/>
           <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M4 2L8 5.5L4 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <button class="view-360">
+        <button
+          class="view-360"
+          :class="{ active: rotationActive }"
+          :aria-pressed="rotationActive"
+          @click="toggleRotation"
+        >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M8 2.5C10.485 2.5 12.5 4.515 12.5 7C12.5 9.485 10.485 11.5 8 11.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             <path d="M8 13.5C5.515 13.5 3.5 11.485 3.5 9C3.5 6.515 5.515 4.5 8 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
             <path d="M11.5 10.5L13 11.5L11.5 12.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span>360°</span>
+          <span>{{ rotationActive ? 'Done' : '360°' }}</span>
         </button>
       </div>
     </template>
@@ -129,8 +152,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import storeImg from '../assets/images/3d/front-angle.png'
+import { computed, nextTick, onMounted, ref } from 'vue'
 
 const props = defineProps({
   zones: { type: Array, required: true },
@@ -138,6 +160,41 @@ const props = defineProps({
   showHeat: { type: Boolean, default: false },
 })
 const emit = defineEmits(['select-zone'])
+const viewerElement = ref(null)
+const rotationActive = ref(false)
+const viewerReady = ref(false)
+
+onMounted(() => {
+  if (props.showHeat) {
+    initialize360Viewer()
+  }
+})
+
+async function initialize360Viewer(attempt = 0) {
+  await nextTick()
+
+  if (typeof window.CI360 !== 'function') {
+    if (attempt < 30) {
+      window.setTimeout(() => initialize360Viewer(attempt + 1), 100)
+    }
+    return
+  }
+
+  try {
+    const viewer = new window.CI360()
+    viewer.initAll()
+    viewerReady.value = true
+  } catch (error) {
+    console.warn('Unable to initialize the 360° store viewer.', error)
+  }
+}
+
+function toggleRotation() {
+  if (!viewerReady.value) {
+    initialize360Viewer()
+  }
+  rotationActive.value = !rotationActive.value
+}
 
 // ─── Plan mode ───────────────────────────────────────────────────────────────
 
@@ -253,7 +310,33 @@ function zoneHitStyle(id) {
 /* ── Heat map mode ───────────────────────────────────── */
 .store-wrap { flex:1; position:relative; display:flex; align-items:center; justify-content:center; overflow:hidden; padding: 24px 32px 56px; }
 
-.store-img { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; position:relative; z-index:1; user-select:none; -webkit-user-drag:none; }
+.store-viewer {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+.store-viewer.rotation-active {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.store-viewer.rotation-active:active { cursor: grabbing; }
+
+.store-viewer :deep(canvas),
+.store-viewer :deep(img) {
+  max-width: 100% !important;
+  max-height: 100% !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain !important;
+}
 
 .heat-overlay {
   position: absolute;
@@ -275,6 +358,28 @@ function zoneHitStyle(id) {
 }
 .zone-hit:hover { background: rgba(255,255,255,0.08); }
 .zone-hit.active { background: rgba(255,255,255,0.12); }
+.zone-hit:disabled { pointer-events: none; }
+
+.rotation-hint {
+  position: absolute;
+  z-index: 9;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border-radius: 999px;
+  background: rgba(26, 26, 26, 0.88);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  pointer-events: none;
+}
+
+.rotation-hint-icon { font-size: 16px; line-height: 1; }
 
 /* ── Bottom controls ─────────────────────────────────── */
 .store-controls {
@@ -328,6 +433,12 @@ function zoneHitStyle(id) {
   transition: transform 120ms;
 }
 .view-360:hover { transform: translateY(-1px); }
+.view-360.active {
+  background: #1A1A1A;
+  border-color: #1A1A1A;
+  color: #fff;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.20);
+}
 
 /* ── Transitions ─────────────────────────────────────── */
 .callout-enter-active, .callout-leave-active { transition:opacity 180ms ease; }
