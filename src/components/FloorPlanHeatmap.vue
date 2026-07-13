@@ -7,20 +7,14 @@
         <div
           ref="viewerElement"
           class="cloudimage-360 store-viewer"
-          :class="{
-            'rotation-active': rotationActive,
-            'is-dragging': rotationDragging,
-          }"
+          :class="{ 'rotation-active': rotationActive }"
           data-folder="/images/store-360/"
           data-filename-x="store-{index}.jpg"
           data-amount-x="3"
-          data-inertia="true"
-          data-drag-speed="260"
+          data-drag-speed="150"
           data-hide-360-logo="true"
           data-full-screen="false"
           aria-label="Interactive 360 degree store floor plan"
-          @pointerdown="beginRotationTransition"
-          @pointercancel="endRotationTransition"
         />
 
         <!-- Heat blob remains visible while the store rotates. -->
@@ -159,7 +153,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 
 const props = defineProps({
   zones: { type: Array, required: true },
@@ -169,19 +163,12 @@ const props = defineProps({
 const emit = defineEmits(['select-zone'])
 const viewerElement = ref(null)
 const rotationActive = ref(false)
-const rotationDragging = ref(false)
 const viewerReady = ref(false)
 
 onMounted(() => {
-  window.addEventListener('pointerup', endRotationTransition)
-
   if (props.showHeat) {
     initialize360Viewer()
   }
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('pointerup', endRotationTransition)
 })
 
 async function initialize360Viewer(attempt = 0) {
@@ -215,20 +202,6 @@ function toggleRotation() {
     initialize360Viewer()
   }
   rotationActive.value = !rotationActive.value
-
-  if (!rotationActive.value) {
-    rotationDragging.value = false
-  }
-}
-
-function beginRotationTransition() {
-  if (rotationActive.value) {
-    rotationDragging.value = true
-  }
-}
-
-function endRotationTransition() {
-  rotationDragging.value = false
 }
 
 // ─── Plan mode ───────────────────────────────────────────────────────────────
@@ -373,6 +346,9 @@ function zoneHitStyle(id) {
   justify-content: center;
   pointer-events: none;
   user-select: none;
+  /* Smooth fade when activating/deactivating rotation mode */
+  opacity: 1;
+  transition: opacity 220ms ease;
 }
 
 .store-viewer.rotation-active {
@@ -389,22 +365,6 @@ function zoneHitStyle(id) {
   width: auto !important;
   height: auto !important;
   object-fit: contain !important;
-  transform: scale(1);
-  filter: saturate(1) blur(0);
-  opacity: 1;
-  transition:
-    opacity 280ms cubic-bezier(0.22, 1, 0.36, 1),
-    filter 280ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
-  transform-origin: center;
-}
-
-.store-viewer.is-dragging :deep(canvas),
-.store-viewer.is-dragging :deep(img) {
-  opacity: 0.86;
-  filter: saturate(0.94) blur(0.35px);
-  transform: scale(0.997);
-  transition-duration: 120ms;
 }
 
 .store-viewer :deep(.cloudimage-360-hints-overlay),
