@@ -55,53 +55,53 @@ export const placementTypes = [
 
 export const timeWindows = ['Morning', 'Afternoon', 'Evening', 'Weekend']
 
-// Time-lapse traffic snapshots — relative traffic index (0-100) per zone
-// Each snapshot represents cumulative/average traffic patterns up to that point in time.
-// Values tell the story: entrance is always busy; back-of-store builds over time as
-// campaigns and signage improvements take effect.
+// Time-lapse traffic snapshots — relative traffic index (0-100) per zone.
+// Story: at Day 1 traffic is flat and spread across the whole floor.
+// Over months it consolidates — entrance and running wall become dominant
+// hotspots while back-of-store cools down, creating true clustering by year 1.
 export const timelapseSnapshots = [
   {
     label: '1 Day',
     zones: {
-      entrance: 88,
-      'running-wall': 65,
-      'lifestyle-endcap': 38,
-      'fitting-area': 28,
-      checkout: 55,
-      'apparel-back': 14,
+      entrance: 68,
+      'running-wall': 55,
+      'lifestyle-endcap': 44,
+      'fitting-area': 38,
+      checkout: 50,
+      'apparel-back': 35,
     },
   },
   {
     label: '3 Months',
     zones: {
-      entrance: 93,
-      'running-wall': 81,
+      entrance: 84,   // red
+      'running-wall': 80,   // red
       'lifestyle-endcap': 58,
-      'fitting-area': 44,
-      checkout: 70,
+      'fitting-area': 42,
+      checkout: 76,   // red
       'apparel-back': 30,
     },
   },
   {
     label: '6 Months',
     zones: {
-      entrance: 91,
-      'running-wall': 85,
-      'lifestyle-endcap': 68,
-      'fitting-area': 55,
-      checkout: 76,
-      'apparel-back': 46,
+      entrance: 93,   // red
+      'running-wall': 90,   // red
+      'lifestyle-endcap': 76,  // red
+      'fitting-area': 40,
+      checkout: 87,   // red
+      'apparel-back': 22,
     },
   },
   {
     label: '1 Year',
     zones: {
-      entrance: 95,
-      'running-wall': 92,
-      'lifestyle-endcap': 78,
-      'fitting-area': 63,
-      checkout: 83,
-      'apparel-back': 60,
+      entrance: 98,   // red
+      'running-wall': 96,   // red
+      'lifestyle-endcap': 82,  // red
+      'fitting-area': 32,
+      checkout: 92,   // red
+      'apparel-back': 14,
     },
   },
 ]

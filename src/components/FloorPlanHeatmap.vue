@@ -3,7 +3,14 @@
 
     <!-- ══════════════ HEAT MAP MODE (3D image + blob) ══════════════ -->
     <template v-if="showHeat">
-      <div class="store-wrap">
+      <div
+        ref="storeWrap"
+        class="store-wrap"
+        @pointerdown="onWrapPointerDown"
+        @pointermove.passive="onWrapPointerMove"
+        @pointerup="onWrapPointerUp"
+        @pointercancel="onWrapPointerUp"
+      >
         <div
           ref="viewerElement"
           class="cloudimage-360 store-viewer"
@@ -17,8 +24,48 @@
           aria-label="Interactive 360 degree store floor plan"
         />
 
-        <!-- Heat blob remains visible while the store rotates. -->
-        <div class="heat-overlay" :style="heatStyle" />
+        <!-- Per-zone heat blobs — each anchored at left/top so they slide with store rotation -->
+        <!--
+          Single SVG covers the full pane. All zones share per-tier blur groups
+          so overlapping same-colour regions blur and merge into ONE unified shape.
+          viewBox="0 0 100 100" + preserveAspectRatio="none" maps each unit to 1%
+          of the pane's width/height, matching the cx/cy zone percentages exactly.
+        -->
+        <svg
+          class="heat-field"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <defs>
+            <!-- Tighter blur on inner tiers so red core survives -->
+            <filter id="hf-g" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="2.4 1.7"/>
+            </filter>
+            <filter id="hf-y" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="1.8 1.3"/>
+            </filter>
+            <filter id="hf-o" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="1.2 0.9"/>
+            </filter>
+            <filter id="hf-r" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="0.7 0.5"/>
+            </filter>
+          </defs>
+
+          <g filter="url(#hf-g)" fill="rgba(22,163,74,0.50)">
+            <ellipse v-for="(e, i) in heatTiers.green"  :key="i" :cx="e.cx" :cy="e.cy" :rx="e.rx" :ry="e.ry"/>
+          </g>
+          <g filter="url(#hf-y)" fill="rgba(234,179,8,0.55)">
+            <ellipse v-for="(e, i) in heatTiers.yellow" :key="i" :cx="e.cx" :cy="e.cy" :rx="e.rx" :ry="e.ry"/>
+          </g>
+          <g filter="url(#hf-o)" fill="rgba(249,115,22,0.60)">
+            <ellipse v-for="(e, i) in heatTiers.orange" :key="i" :cx="e.cx" :cy="e.cy" :rx="e.rx" :ry="e.ry"/>
+          </g>
+          <g filter="url(#hf-r)" fill="rgba(220,38,38,0.70)">
+            <ellipse v-for="(e, i) in heatTiers.red"    :key="i" :cx="e.cx" :cy="e.cy" :rx="e.rx" :ry="e.ry"/>
+          </g>
+        </svg>
 
         <!-- Zone selection dots (invisible click targets over image areas) -->
         <button
@@ -203,9 +250,37 @@ const props = defineProps({
   showHeat: { type: Boolean, default: false },
 })
 const emit = defineEmits(['select-zone'])
+const storeWrap = ref(null)
 const viewerElement = ref(null)
 const rotationActive = ref(false)
 const viewerReady = ref(false)
+
+// ─── Frame tracker — shadows Cloudimage's internal frame index ───────────────
+// 0 = store-1.jpg (overhead)  ·  1 = store-2.jpg (right-angle)  ·  2 = store-3.jpg (front)
+const currentFrame = ref(0)
+let _dragAnchorX = null
+let _dragBaseFrame = 0
+const PX_PER_FRAME = 58 // pixels of horizontal drag ≈ 1 frame step in Cloudimage
+
+function onWrapPointerDown(e) {
+  if (!rotationActive.value) return
+  _dragAnchorX = e.clientX
+  _dragBaseFrame = currentFrame.value
+}
+
+function onWrapPointerMove(e) {
+  if (_dragAnchorX === null || !rotationActive.value) return
+  const dx = e.clientX - _dragAnchorX
+  const frameShift = Math.round(dx / PX_PER_FRAME)
+  currentFrame.value = (((_dragBaseFrame + frameShift) % 3) + 3) % 3
+}
+
+function onWrapPointerUp() {
+  if (_dragAnchorX !== null) {
+    _dragBaseFrame = currentFrame.value
+    _dragAnchorX = null
+  }
+}
 
 // ─── Time-lapse scrubber ─────────────────────────────────────────────────────
 const timeLapseIndex = ref(0)
@@ -328,51 +403,120 @@ function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : '' }
 
 // ─── Heat map mode ────────────────────────────────────────────────────────────
 
-// Approximate % positions of zone centers within the 3D image viewport
-const ZONE_HEAT_POS = {
-  entrance:           { cx: '50%', cy: '72%' },
-  'running-wall':     { cx: '68%', cy: '33%' },
-  'lifestyle-endcap': { cx: '48%', cy: '50%' },
-  'fitting-area':     { cx: '28%', cy: '50%' },
-  checkout:           { cx: '52%', cy: '63%' },
-  'apparel-back':     { cx: '50%', cy: '28%' },
+// Zone center positions (% of store-wrap) per camera angle.
+// Frame 0 = store-1.jpg overhead · 1 = store-2.jpg right-angle · 2 = store-3.jpg front
+// These values can be fine-tuned to match the exact pixel positions in each image.
+const ZONE_HEAT_POS_BY_FRAME = [
+  // Frame 0 — overhead-floor view (default starting frame)
+  {
+    entrance:           { cx: 50, cy: 72 },
+    'running-wall':     { cx: 68, cy: 33 },
+    'lifestyle-endcap': { cx: 48, cy: 50 },
+    'fitting-area':     { cx: 28, cy: 50 },
+    checkout:           { cx: 52, cy: 63 },
+    'apparel-back':     { cx: 50, cy: 28 },
+  },
+  // Frame 1 — right-angle side view (camera on the right, running wall prominent)
+  {
+    entrance:           { cx: 20, cy: 70 },
+    'running-wall':     { cx: 52, cy: 40 },
+    'lifestyle-endcap': { cx: 44, cy: 54 },
+    'fitting-area':     { cx: 33, cy: 56 },
+    checkout:           { cx: 26, cy: 62 },
+    'apparel-back':     { cx: 74, cy: 34 },
+  },
+  // Frame 2 — front-angle view (entrance near bottom, back wall at top)
+  {
+    entrance:           { cx: 50, cy: 78 },
+    'running-wall':     { cx: 72, cy: 36 },
+    'lifestyle-endcap': { cx: 50, cy: 52 },
+    'fitting-area':     { cx: 28, cy: 52 },
+    checkout:           { cx: 56, cy: 67 },
+    'apparel-back':     { cx: 50, cy: 25 },
+  },
+]
+
+function getZonePos(zoneId) {
+  const map = ZONE_HEAT_POS_BY_FRAME[currentFrame.value] || ZONE_HEAT_POS_BY_FRAME[0]
+  return map[zoneId] || { cx: 50, cy: 46 }
 }
 
-const DEFAULT_POS = { cx: '50%', cy: '46%' }
-
-const heatStyle = computed(() => {
+function getCurrentTrafficForZone(zone) {
   const snapshot = timelapseSnapshots[timeLapseIndex.value]
-  const gradients = []
+  return snapshot?.zones[zone.id] ?? zone.avgTraffic
+}
 
-  // Render a blob for every zone, sized and colored by traffic at the current time slice
+// Per-zone lobe offsets (dx/dy as fraction of displacement units) —
+// gives each zone a distinct multi-lobe silhouette.
+const ZONE_LOBES = {
+  entrance:           [{ dx: 0,     dy: 0    }, { dx: 0.14,  dy: -0.10 }],
+  'running-wall':     [{ dx: 0,     dy: 0    }, { dx: -0.12, dy:  0.08 }, { dx: 0.16, dy: 0.06 }],
+  'lifestyle-endcap': [{ dx: 0,     dy: 0    }, { dx: 0.10,  dy:  0.12 }],
+  'fitting-area':     [{ dx: 0,     dy: 0    }, { dx: -0.14, dy: -0.08 }, { dx: 0.08, dy: 0.10 }],
+  checkout:           [{ dx: 0,     dy: 0    }, { dx: 0.12,  dy: -0.06 }],
+  'apparel-back':     [{ dx: 0,     dy: 0    }, { dx: -0.10, dy:  0.12 }, { dx: 0.14, dy: -0.08 }],
+}
+
+// Builds per-colour-tier ellipse arrays for the unified heat-field SVG.
+// viewBox is 0–100 in both axes so cx/cy match zone position percentages directly.
+const heatTiers = computed(() => {
+  const snap   = timelapseSnapshots[timeLapseIndex.value]
+  const spread = [1.6, 1.1, 0.65, 0.35][timeLapseIndex.value] ?? 1.0
+  const tiers  = { green: [], yellow: [], orange: [], red: [] }
+
   props.zones.forEach((zone) => {
-    const pos = ZONE_HEAT_POS[zone.id] || DEFAULT_POS
-    const traffic = snapshot?.zones[zone.id] ?? zone.avgTraffic
-    const intensity = traffic / 100
-    const coreR   = Math.round(60  + intensity * 120)  // 60–180 px
-    const midR    = Math.round(140 + intensity * 160)  // 140–300 px
-    const outerR  = Math.round(200 + intensity * 200)  // 200–400 px
-    const isHot   = traffic >= 75
-    const isMid   = traffic >= 45
+    const pos    = getZonePos(zone.id)   // { cx, cy } already in 0–100 units
+    const traffic = snap?.zones[zone.id] ?? zone.avgTraffic
+    const t      = traffic / 100
+    const lobes  = ZONE_LOBES[zone.id] || [{ dx: 0, dy: 0 }]
 
-    // Core: red/amber/green per traffic level
-    const [cr, cg, cb] = isHot ? [220, 38, 38] : isMid ? [234, 179, 8] : [22, 163, 74]
-    // Outer glow: green ambient for all zones
-    const [gr, gg, gb] = [34, 197, 94]
+    // Ellipse radii in viewBox units (1 unit = 1% of pane dimension)
+    const rx = 2.5 + t * 13   // 2.5–15.5 units
+    const ry = 1.8 + t * 8.5  // 1.8–10.3 units
 
-    const a0 = (intensity * 0.90).toFixed(2)
-    const a1 = (intensity * 0.48).toFixed(2)
-    const a2 = (intensity * 0.22).toFixed(2)
-    const a3 = (intensity * 0.10).toFixed(2)
+    // Max lobe displacement in viewBox units, shrinks as blobs consolidate over time
+    const ldx = 13 * spread
+    const ldy = 8  * spread
 
-    gradients.push(
-      `radial-gradient(circle ${coreR}px at ${pos.cx} ${pos.cy}, rgba(${cr},${cg},${cb},${a0}) 0%, rgba(${cr},${cg},${cb},${a1}) 45%, transparent 80%)`,
-      `radial-gradient(circle ${midR}px at ${pos.cx} ${pos.cy}, rgba(${cr},${cg},${cb},${a2}) 0%, transparent 70%)`,
-      `radial-gradient(circle ${outerR}px at ${pos.cx} ${pos.cy}, rgba(${gr},${gg},${gb},${a3}) 0%, transparent 65%)`,
-    )
+    // GREEN outer — one ellipse per lobe
+    lobes.forEach((l, i) => {
+      tiers.green.push({
+        cx: pos.cx + l.dx * ldx,
+        cy: pos.cy + l.dy * ldy,
+        rx: rx * (1 - i * 0.05),
+        ry: ry * (1 - i * 0.05),
+      })
+    })
+
+    if (traffic >= 45) {
+      // YELLOW mid — lobes pulled to 55% of spread
+      lobes.slice(0, 2).forEach((l, i) => {
+        tiers.yellow.push({
+          cx: pos.cx + l.dx * ldx * 0.55,
+          cy: pos.cy + l.dy * ldy * 0.55,
+          rx: rx * 0.66,
+          ry: ry * 0.66,
+        })
+      })
+
+      // ORANGE inner — centred with slight secondary-lobe pull
+      const l0 = lobes[0]
+      const l1 = lobes[1] || { dx: 0, dy: 0 }
+      tiers.orange.push({
+        cx: pos.cx + (l0.dx * 0.25 + l1.dx * 0.12) * ldx,
+        cy: pos.cy + (l0.dy * 0.25 + l1.dy * 0.12) * ldy,
+        rx: rx * 0.50,
+        ry: ry * 0.50,
+      })
+    }
+
+    if (traffic >= 75) {
+      // RED core — always at zone centre
+      tiers.red.push({ cx: pos.cx, cy: pos.cy, rx: rx * 0.32, ry: ry * 0.32 })
+    }
   })
 
-  return { background: gradients.join(',') }
+  return tiers
 })
 
 // Zone click hit-area positions (% within the store image)
@@ -475,15 +619,15 @@ function zoneHitStyle(id) {
   display: none !important;
 }
 
-.heat-overlay {
+/* Single full-pane SVG — all zones in one drawing context so blobs merge */
+.heat-field {
   position: absolute;
-  inset: -72px -48px -120px;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   z-index: 2;
   pointer-events: none;
-  mix-blend-mode: screen;
-  background-size: calc(100% - 96px) calc(100% - 192px) !important;
-  background-position: 48px 72px !important;
-  background-repeat: no-repeat !important;
+  overflow: visible;
 }
 
 /* Invisible zone hit targets over image */
